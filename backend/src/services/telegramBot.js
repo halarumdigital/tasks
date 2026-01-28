@@ -316,8 +316,22 @@ const initBot = () => {
     const messageId = query.message.message_id;
     const data = query.data;
 
+    // Ignorar botoes ja respondidos
+    if (data === 'noop') {
+      bot.answerCallbackQuery(query.id, { text: 'Ja respondido!' });
+      return;
+    }
+
     try {
-      const [action, taskId, logDate] = data.split('_');
+      const parts = data.split('_');
+      if (parts.length < 3) {
+        bot.answerCallbackQuery(query.id, { text: 'Acao invalida' });
+        return;
+      }
+
+      const action = parts[0];
+      const taskId = parts[1];
+      const logDate = parts.slice(2).join('_');
 
       // Buscar tarefa
       const [tasks] = await pool.query(`
