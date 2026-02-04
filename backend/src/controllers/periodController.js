@@ -180,6 +180,145 @@ const periodController = {
     }
   },
 
+  // POST /api/periods/:id/clone
+  async clone(req, res) {
+    try {
+      const { id } = req.params;
+      const { name, start_date } = req.body;
+
+      if (!name || !start_date) {
+        return res.status(400).json({ error: 'name e start_date sao obrigatorios' });
+      }
+
+      // Verificar se ja existe periodo ativo
+      const [activePeriods] = await pool.query(
+        'SELECT id FROM periods WHERE status = "active"'
+      );
+
+      if (activePeriods.length > 0) {
+        return res.status(400).json({ error: 'Ja existe um periodo ativo. Finalize-o antes de criar um novo.' });
+      }
+
+      // Buscar periodo original
+      const [originalPeriods] = await pool.query(
+        'SELECT * FROM periods WHERE id = ?',
+        [id]
+      );
+
+      if (originalPeriods.length === 0) {
+        return res.status(404).json({ error: 'Periodo original nao encontrado' });
+      }
+
+      const originalPeriod = originalPeriods[0];
+
+      // Calcular end_date (12 semanas = 84 dias)
+      const startDate = new Date(start_date);
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 83);
+
+      // Criar novo periodo
+      const [newPeriodResult] = await pool.query(
+        'INSERT INTO periods (vision_id, name, start_date, end_date, status) VALUES (?, ?, ?, ?, "active")',
+        [originalPeriod.vision_id, name, start_date, endDate.toISOString().split('T')[0]]
+      );
+
+      const newPeriodId = newPeriodResult.insertId;
+
+      // Buscar metas do periodo original
+      const [originalGoals] = await pool.query(
+        'SELECT * FROM goals WHERE period_id = ?',
+        [id]
+      );
+
+      // Mapear IDs antigos para novos
+      const goalIdMap = {};
+      const tacticIdMap = {};
+
+      // Clonar metas
+      for (const goal of originalGoals) {
+        const [newGoalResult] = await pool.query(
+          'INSERT INTO goals (period_id, title, description) VALUES (?, ?, ?)',
+          [newPeriodId, goal.title, goal.description]
+        );
+        goalIdMap[goal.id] = newGoalResult.insertId;
+
+        // Buscar taticas da meta
+        const [originalTactics] = await pool.query(
+          'SELECT * FROM tactics WHERE goal_id = ?',
+          [goal.id]
+        );
+
+        // Clonar taticas
+        for (const tactic of originalTactics) {
+          const [newTacticResult] = await pool.query(
+            'INSERT INTO tactics (goal_id, title, description) VALUES (?, ?, ?)',
+            [goalIdMap[goal.id], tactic.title, tactic.description]
+          );
+          tacticIdMap[tactic.id] = newTacticResult.insertId;
+
+          // Buscar tarefas da tatica
+          const [originalTasks] = await pool.query(
+            'SELECT * FROM tasks WHERE tactic_id = ?',
+            [tactic.id]
+          );
+
+          // Clonar tarefas (resetando progresso)
+          for (const task of originalTasks) {
+            await pool.query(`
+              INSERT INTO tasks (
+                tactic_id, title, description, metric_type, total_target, unit,
+                speed_per_hour, daily_time_minutes, daily_target, weekdays,
+                notification_time, is_active
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+              tacticIdMap[tactic.id],
+              task.title,
+              task.description,
+              task.metric_type,
+              task.total_target,
+              task.unit,
+              task.speed_per_hour,
+              task.daily_time_minutes,
+              task.daily_target,
+              task.weekdays,
+              task.notification_time,
+              task.is_active
+            ]);
+          }
+        }
+      }
+
+      // Buscar periodo criado com todas as informacoes
+      const [newPeriod] = await pool.query(`
+        SELECT p.*, v.title as vision_title
+        FROM periods p
+        JOIN visions v ON p.vision_id = v.id
+        WHERE p.id = ?
+      `, [newPeriodId]);
+
+      // Contar o que foi clonado
+      const [stats] = await pool.query(`
+        SELECT
+          (SELECT COUNT(*) FROM goals WHERE period_id = ?) as goals,
+          (SELECT COUNT(*) FROM tactics tc JOIN goals g ON tc.goal_id = g.id WHERE g.period_id = ?) as tactics,
+          (SELECT COUNT(*) FROM tasks t JOIN tactics tc ON t.tactic_id = tc.id JOIN goals g ON tc.goal_id = g.id WHERE g.period_id = ?) as tasks
+      `, [newPeriodId, newPeriodId, newPeriodId]);
+
+      return res.status(201).json({
+        period: newPeriod[0],
+        cloned: {
+          goals: stats[0].goals,
+          tactics: stats[0].tactics,
+          tasks: stats[0].tasks
+        },
+        message: `Periodo clonado com sucesso! ${stats[0].goals} metas, ${stats[0].tactics} taticas e ${stats[0].tasks} tarefas copiadas.`
+      });
+    } catch (error) {
+      console.error('Erro ao clonar periodo:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor' });
+    }
+  },
+
   // GET /api/periods/:id/summary
   async getSummary(req, res) {
     try {

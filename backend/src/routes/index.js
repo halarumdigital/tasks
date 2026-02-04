@@ -36,6 +36,7 @@ router.get('/periods/:id', periodController.get);
 router.put('/periods/:id', periodController.update);
 router.delete('/periods/:id', periodController.delete);
 router.get('/periods/:id/summary', periodController.getSummary);
+router.post('/periods/:id/clone', periodController.clone);
 
 // Rotas de metas
 router.get('/goals', goalController.list);

@@ -19,12 +19,14 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Tooltip,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Flag as GoalIcon,
+  ContentCopy as CloneIcon,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -41,10 +43,17 @@ const Periods = () => {
   const [visions, setVisions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [editingPeriod, setEditingPeriod] = useState(null);
+  const [cloningPeriod, setCloningPeriod] = useState(null);
   const [formData, setFormData] = useState({
     vision_id: visionIdParam || '',
+    name: '',
+    start_date: format(new Date(), 'yyyy-MM-dd'),
+  });
+  const [cloneFormData, setCloneFormData] = useState({
     name: '',
     start_date: format(new Date(), 'yyyy-MM-dd'),
   });
@@ -95,11 +104,26 @@ const Periods = () => {
     setEditingPeriod(null);
   };
 
+  const handleOpenCloneDialog = (period) => {
+    setCloningPeriod(period);
+    setCloneFormData({
+      name: `${period.name} (Novo Ciclo)`,
+      start_date: format(new Date(), 'yyyy-MM-dd'),
+    });
+    setCloneDialogOpen(true);
+  };
+
+  const handleCloseCloneDialog = () => {
+    setCloneDialogOpen(false);
+    setCloningPeriod(null);
+  };
+
   const handleSave = async () => {
     if (!formData.name.trim() || !formData.vision_id) return;
 
     try {
       setSaving(true);
+      setError('');
       if (editingPeriod) {
         await api.put(`/periods/${editingPeriod.id}`, {
           name: formData.name,
@@ -112,6 +136,24 @@ const Periods = () => {
       fetchData();
     } catch (err) {
       setError(err.response?.data?.error || 'Erro ao salvar periodo');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClone = async () => {
+    if (!cloneFormData.name.trim() || !cloningPeriod) return;
+
+    try {
+      setSaving(true);
+      setError('');
+      const response = await api.post(`/periods/${cloningPeriod.id}/clone`, cloneFormData);
+      setSuccess(response.data.message);
+      handleCloseCloneDialog();
+      fetchData();
+      setTimeout(() => setSuccess(''), 5000);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erro ao clonar periodo');
     } finally {
       setSaving(false);
     }
@@ -157,6 +199,7 @@ const Periods = () => {
   }
 
   const hasActivePeriod = periods.some(p => p.status === 'active');
+  const completedPeriods = periods.filter(p => p.status === 'completed');
 
   return (
     <MainLayout title="Periodos">
@@ -178,13 +221,20 @@ const Periods = () => {
         </Alert>
       )}
 
+      {!hasActivePeriod && completedPeriods.length > 0 && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          Voce pode criar um novo periodo do zero ou clonar um periodo anterior (copiando todas as metas, taticas e tarefas).
+        </Alert>
+      )}
+
       {visions.length === 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           Crie uma visao primeiro antes de criar periodos.
         </Alert>
       )}
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
+      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
       <Grid container spacing={3}>
         {periods.length === 0 ? (
@@ -213,7 +263,7 @@ const Periods = () => {
                     {format(new Date(period.start_date), 'dd/MM/yyyy', { locale: ptBR })} -{' '}
                     {format(new Date(period.end_date), 'dd/MM/yyyy', { locale: ptBR })}
                   </Typography>
-                  <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
+                  <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                     <Button
                       size="small"
                       startIcon={<GoalIcon />}
@@ -221,6 +271,18 @@ const Periods = () => {
                     >
                       Metas
                     </Button>
+                    {period.status !== 'active' && !hasActivePeriod && (
+                      <Tooltip title="Clonar para novo ciclo">
+                        <Button
+                          size="small"
+                          color="success"
+                          startIcon={<CloneIcon />}
+                          onClick={() => handleOpenCloneDialog(period)}
+                        >
+                          Clonar
+                        </Button>
+                      </Tooltip>
+                    )}
                     <IconButton size="small" onClick={() => handleOpenDialog(period)}>
                       <EditIcon fontSize="small" />
                     </IconButton>
@@ -235,7 +297,7 @@ const Periods = () => {
         )}
       </Grid>
 
-      {/* Dialog */}
+      {/* Dialog Novo/Editar */}
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle>{editingPeriod ? 'Editar Periodo' : 'Novo Periodo'}</DialogTitle>
         <DialogContent>
@@ -291,6 +353,51 @@ const Periods = () => {
           <Button onClick={handleCloseDialog}>Cancelar</Button>
           <Button onClick={handleSave} variant="contained" disabled={saving || !formData.name.trim()}>
             {saving ? 'Salvando...' : 'Salvar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog Clonar */}
+      <Dialog open={cloneDialogOpen} onClose={handleCloseCloneDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Clonar Periodo</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Ao clonar, todas as metas, taticas e tarefas serao copiadas para o novo periodo.
+            O progresso sera resetado para zero.
+          </Alert>
+          {cloningPeriod && (
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Clonando de: <strong>{cloningPeriod.name}</strong>
+            </Typography>
+          )}
+          <TextField
+            margin="dense"
+            label="Nome do Novo Periodo"
+            fullWidth
+            value={cloneFormData.name}
+            onChange={(e) => setCloneFormData({ ...cloneFormData, name: e.target.value })}
+            placeholder="Ex: Q2 2025, Segundo Trimestre"
+          />
+          <TextField
+            margin="dense"
+            label="Data de Inicio"
+            type="date"
+            fullWidth
+            value={cloneFormData.start_date}
+            onChange={(e) => setCloneFormData({ ...cloneFormData, start_date: e.target.value })}
+            InputLabelProps={{ shrink: true }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseCloneDialog}>Cancelar</Button>
+          <Button
+            onClick={handleClone}
+            variant="contained"
+            color="success"
+            startIcon={<CloneIcon />}
+            disabled={saving || !cloneFormData.name.trim()}
+          >
+            {saving ? 'Clonando...' : 'Clonar Periodo'}
           </Button>
         </DialogActions>
       </Dialog>
