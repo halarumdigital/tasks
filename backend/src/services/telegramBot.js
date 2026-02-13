@@ -47,6 +47,14 @@ const getRandomMessage = (messages) => {
   return messages[Math.floor(Math.random() * messages.length)];
 };
 
+// Funcao para obter data local no formato YYYY-MM-DD (respeitando timezone)
+const getLocalDateStr = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const initBot = () => {
   if (!telegramConfig.token) {
     console.log('Token do Telegram nao configurado');
@@ -54,6 +62,15 @@ const initBot = () => {
   }
 
   bot = new TelegramBot(telegramConfig.token, { polling: true });
+
+  // Tratamento de erros de polling - sem isso o bot morre silenciosamente
+  bot.on('polling_error', (error) => {
+    console.error('Erro de polling do Telegram:', error.code, error.message);
+  });
+
+  bot.on('error', (error) => {
+    console.error('Erro geral do bot Telegram:', error.message);
+  });
 
   // Comando /start
   bot.onText(/\/start/, async (msg) => {
@@ -101,7 +118,7 @@ const initBot = () => {
       const today = new Date();
       const dayOfWeek = today.getDay();
       const dayBit = Math.pow(2, dayOfWeek);
-      const todayStr = today.toISOString().split('T')[0];
+      const todayStr = getLocalDateStr(today);
 
       const [tasks] = await pool.query(`
         SELECT t.*, tc.title as tactic_title, g.title as goal_title,

@@ -1,6 +1,14 @@
 const { pool } = require('../config/database');
 const { sendMessage } = require('./telegramBot');
 
+// Funcao para obter data local no formato YYYY-MM-DD (respeitando timezone)
+const getLocalDateStr = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const notificationService = {
   // Enviar notificacao individual de uma tarefa
   async sendTaskNotification(task, config, todayStr, currentWeek) {
@@ -56,7 +64,7 @@ const notificationService = {
       const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:00`;
       const dayOfWeek = now.getDay();
       const dayBit = Math.pow(2, dayOfWeek);
-      const todayStr = now.toISOString().split('T')[0];
+      const todayStr = getLocalDateStr(now);
 
       // Buscar configuracao do Telegram ativa
       const [configs] = await pool.query(
@@ -128,7 +136,7 @@ const notificationService = {
       if (configs.length === 0) return;
 
       const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
+      const todayStr = getLocalDateStr(today);
 
       // Buscar estatisticas do dia
       const [dayStats] = await pool.query(`
